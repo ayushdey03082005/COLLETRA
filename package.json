@@ -14,5 +14,8 @@
   "type": "module",
   "workspaces": [
     "src/COLLETRA_frontend"
-  ]
+  ],
+  "dependencies": {
+    "@dfinity/auth-client": "^3.1.0"
+  }
 }
