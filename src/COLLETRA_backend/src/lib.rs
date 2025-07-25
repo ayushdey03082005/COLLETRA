@@ -1,9 +1,9 @@
 // --- DEPENDENCIES ---
 // Add these to your Cargo.toml
-// candid = "0.8"
-// ic-cdk = "0.6"
-// ic-cdk-macros = "0.6"
-// ic-stable-structures = "0.5.4"
+// candid = "0.10.15"
+// ic-cdk = "0.18.5"
+// ic-cdk-macros = "0.18.5"
+// ic-stable-structures = "0.7.0"
 // serde = "1.0"
 // serde_json = "1.0"
 // num-traits = "0.2"
@@ -11,25 +11,24 @@
 use candid::{CandidType, Principal, Nat};
 use ic_cdk::{query, update, api::{caller, time}};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, BoundedStorable, Storable};
+use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, BoundedStorable, Storable, storable::Bound};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use serde::{Deserialize, Serialize};
-// use num_traits::ToPrimitive;
-use candid::Principal;
+use num_traits::ToPrimitive;
 
 // --- TYPE DEFINITIONS ---
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
-#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 enum Role {
     Borrower,
     Lender,
     Admin,
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 enum LoanStatus {
     Pending,   // Waiting for a lender
     Active,    // Funded and ongoing
@@ -37,7 +36,7 @@ enum LoanStatus {
     Defaulted, // Not paid in time, collateral liquidated
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 enum TransactionType {
     LoanRequested,
     LoanFunded,
@@ -48,7 +47,7 @@ enum TransactionType {
 
 // --- DATA STRUCTURES ---
 
-#[derive(CandidType, Deserialize, Serialize, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 struct User {
     principal: Principal,
     roles: Vec<Role>,
@@ -57,7 +56,7 @@ struct User {
     created_at: u64,
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 struct Loan {
     id: u64,
     borrower: Principal,
@@ -73,13 +72,13 @@ struct Loan {
     risk_factor: f64, 
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 struct Repayment {
     amount: Nat,
     timestamp: u64,
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 struct Transaction {
     id: u64,
     transaction_type: TransactionType,
@@ -89,54 +88,47 @@ struct Transaction {
     details: String,
 }
 
-// --- STABLE STORAGE IMPLEMENTATION ---
-// This ensures our data persists across canister upgrades.
+// --- STABLE STORAGE IMPLEMENTATION (Corrected for ic-stable-structures v0.7.0) ---
 
-// Storable trait implementation for serialization/deserialization
 impl Storable for User {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
-
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         serde_json::from_slice(bytes.as_ref()).unwrap()
     }
+}
+
+impl BoundedStorable for User {
+    const MAX_SIZE: u32 = 2048;
+    const IS_FIXED_SIZE: bool = false;
 }
 
 impl Storable for Loan {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
-
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         serde_json::from_slice(bytes.as_ref()).unwrap()
     }
+}
+
+impl BoundedStorable for Loan {
+    const MAX_SIZE: u32 = 2048;
+    const IS_FIXED_SIZE: bool = false;
 }
 
 impl Storable for Transaction {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(serde_json::to_vec(self).unwrap())
     }
-
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         serde_json::from_slice(bytes.as_ref()).unwrap()
     }
 }
 
-
-// BoundedStorable implementation for our structs
-impl BoundedStorable for User {
-    const MAX_SIZE: u32 = 2048; // Max size in bytes for a User struct
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl BoundedStorable for Loan {
-    const MAX_SIZE: u32 = 2048; // Max size in bytes for a Loan struct
-    const IS_FIXED_SIZE: bool = false;
-}
-
 impl BoundedStorable for Transaction {
-    const MAX_SIZE: u32 = 1024; // Max size in bytes for a Transaction struct
+    const MAX_SIZE: u32 = 1024;
     const IS_FIXED_SIZE: bool = false;
 }
 
@@ -216,7 +208,7 @@ fn calculate_loan_health(loan: &Loan) -> f64 {
     let now = time();
     let overdue_penalty = if now > loan.due_date {
         // Example: 0.1 penalty for each day overdue
-        let days_overdue = (now - loan.due_date) / (24 * 60 * 60 * 1000000000);
+        let days_overdue = (now - loan.due_date) / (24 * 60 * 60 * 1_000_000_000);
         (days_overdue as f64) * 0.1
     } else {
         0.0
@@ -258,7 +250,7 @@ fn create_loan_request(amount: Nat, collateral_value: Nat, duration_days: u64) -
         status: LoanStatus::Pending,
         created_at: time(),
         funded_at: None,
-        due_date: time() + (duration_days * 24 * 60 * 60 * 1000000000),
+        due_date: time() + (duration_days * 24 * 60 * 60 * 1_000_000_000),
         repayment_history: Vec::new(),
         risk_factor: 1.2, // Example risk factor
     };
@@ -280,7 +272,7 @@ fn create_loan_request(amount: Nat, collateral_value: Nat, duration_days: u64) -
 fn fund_loan(loan_id: u64) -> Result<Loan, String> {
     let lender_principal = caller();
     
-    LOANS.with(|loans| {
+    let result = LOANS.with(|loans| {
         let mut loans_mut = loans.borrow_mut();
         let mut loan = match loans_mut.get(&loan_id) {
             Some(l) => l.clone(),
@@ -312,7 +304,8 @@ fn fund_loan(loan_id: u64) -> Result<Loan, String> {
         );
 
         Ok(loan)
-    })
+    });
+    result
 }
 
 // --- MODULE 5: ALERT & NOTIFICATION SYSTEM ---
@@ -321,14 +314,21 @@ fn fund_loan(loan_id: u64) -> Result<Loan, String> {
 fn check_loans_for_alerts() -> Vec<(u64, String)> {
     // This function would be called periodically by an external service or a canister timer.
     let mut alerts = Vec::new();
+    let now = time();
+
     LOANS.with(|loans| {
         for (id, loan) in loans.borrow().iter() {
             let health = calculate_loan_health(&loan);
             if health < 1.0 {
                 alerts.push((id, format!("Loan #{} is at risk of liquidation!", id)));
             }
-            if time() < loan.due_date {
-                let days_left = (loan.due_date - time()) / (24 * 60 * 60 * 1000000000);
+
+            if now > loan.due_date {
+                let days_overdue = (now - loan.due_date) / (24 * 60 * 60 * 1_000_000_000);
+                alerts.push((id, format!("Loan #{} is overdue by {} days!", id, days_overdue)));
+            } else {
+                let time_to_due = loan.due_date - now;
+                let days_left = time_to_due / (24 * 60 * 60 * 1_000_000_000);
                 if days_left <= 3 {
                      alerts.push((id, format!("Loan #{} is due in {} days!", id, days_left)));
                 }
@@ -392,11 +392,4 @@ fn get_transaction(id: u64) -> Option<Transaction> {
 }
 
 // --- CANDID EXPORT ---
-// ic_cdk::export_candid!();
-#[ic_cdk::query]
-fn whoami() -> Principal {
-    ic_cdk::caller()
-}
-
-// Export the interface for the smart contract.
 ic_cdk::export_candid!();
