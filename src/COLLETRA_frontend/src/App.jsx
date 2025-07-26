@@ -674,7 +674,7 @@
 //     </div>
 //   );
 // }
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect ,useMemo} from 'react';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import LandingPage from './pages/LandingPage';
@@ -686,6 +686,266 @@ import LoanApplicationPage from './pages/LoanApplicationPage';
 import ProfilePage from './pages/ProfilePage';
 import LoanHealthPage from './pages/LoanHealthPage';
 import './App.css';
+import { AuthClient } from '@dfinity/auth-client';
+import { createActor, canisterId } from '../../declarations/COLLETRA_backend';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { ShieldCheck, ShieldAlert, ShieldX, DollarSign, Clock, BarChart2, Users, Settings, LogOut, Github, Home, FileText, Briefcase, TrendingUp, User, Wallet, Sun, Moon, Loader2 } from 'lucide-react';
+
+
+const canisterId = 'bkyz2-fmaaa-aaaaa-qaaaq-cai'; // Example canister ID
+const createActor = (canisterId, options) => {
+    console.log("Creating mock actor for canister:", canisterId, "with principal:", options.agentOptions.identity.getPrincipal().toString());
+    const MOCK_DB = {
+        users: {},
+        loans: {
+            0: { id: 0, borrower: 'borrower-principal-123', lender: null, amount: 10000, collateral_value: 18000, status: { 'Pending': null }, created_at: BigInt(Date.now() * 1000000), due_date: BigInt(Date.now() * 1000000) + BigInt(25 * 24 * 60 * 60 * 1000000000), risk_factor: 1.1 },
+            1: { id: 1, borrower: 'another-borrower', lender: null, amount: 5000, collateral_value: 9000, status: { 'Pending': null }, created_at: BigInt(Date.now() * 1000000), due_date: BigInt(Date.now() * 1000000) + BigInt(30 * 24 * 60 * 60 * 1000000000), risk_factor: 1.2 },
+        },
+    };
+
+    return {
+        register_user: async (initial_role) => {
+            const principalId = options.agentOptions.identity.getPrincipal().toString();
+            console.log("ACTOR: register_user called with", { principalId, initial_role });
+            if (MOCK_DB.users[principalId]) {
+                 console.log("User already exists, returning existing data.");
+                return { 'Ok': MOCK_DB.users[principalId] };
+            }
+            const newUser = {
+                principal: principalId,
+                roles: [initial_role],
+                transaction_history: [],
+                active_loan_ids: [],
+                created_at: BigInt(Date.now() * 1_000_000),
+            };
+            MOCK_DB.users[principalId] = newUser;
+            console.log("New user created:", newUser);
+            return { 'Ok': newUser };
+        },
+        get_platform_analytics: async () => {
+             return { 'Ok': [BigInt(125000), BigInt(15), BigInt(2)] };
+        },
+        // Add other backend methods here as needed for full dashboard functionality
+    };
+};
+
+
+// --- UI COMPONENTS (src/components/) ---
+
+const NeonButton = ({ children, onClick, className = '', disabled = false }) => (
+  <button onClick={onClick} disabled={disabled} className={`neon-button ${className}`}>
+    {children}
+  </button>
+);
+
+const GlassCard = ({ children, className = '' }) => (
+  <div className={`glass-card ${className}`}>{children}</div>
+);
+
+const Sidebar = ({ role, currentPage, setPage, onLogout, theme, toggleTheme }) => {
+    const navItems = {
+        borrower: [ { name: 'Home', icon: Home, page: 'borrower/dashboard' }, { name: 'Apply', icon: FileText, page: 'borrower/apply' }, { name: 'Loan Health', icon: ShieldCheck, page: 'borrower/health' }, { name: 'History', icon: Briefcase, page: 'profile' }, ],
+        lender: [ { name: 'Home', icon: Home, page: 'lender/dashboard' }, { name: 'Invest', icon: TrendingUp, page: 'lender/invest' }, { name: 'Portfolio', icon: Briefcase, page: 'lender/portfolio' }, { name: 'Profile', icon: User, page: 'profile' }, ],
+        admin: [ { name: 'Overview', icon: BarChart2, page: 'admin/dashboard' }, { name: 'Users', icon: Users, page: 'admin/users' }, { name: 'Loans', icon: DollarSign, page: 'admin/loans' }, { name: 'Wallets', icon: Wallet, page: 'admin/wallets' }, ],
+    };
+    const currentNav = navItems[role] || [];
+    return (
+        <aside className="sidebar">
+            <div className="sidebar-header">Collatera</div>
+            <nav className="flex-grow">
+                <ul>
+                    {currentNav.map(item => (
+                        <li key={item.name}>
+                            <a href="#" onClick={(e) => { e.preventDefault(); setPage(item.page); }} className={`sidebar-link ${currentPage === item.page ? 'active' : ''}`}>
+                                <item.icon className="h-5 w-5 mr-3" />
+                                <span>{item.name}</span>
+                            </a>
+                        </li>
+                    ))}
+                </ul>
+            </nav>
+            <div className="mt-auto">
+                 <button onClick={toggleTheme} className="sidebar-link">
+                    {theme === 'dark' ? <Sun className="h-5 w-5 mr-3" /> : <Moon className="h-5 w-5 mr-3" />}
+                    <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                </button>
+                <a href="#" onClick={(e) => { e.preventDefault(); setPage('profile'); }} className="sidebar-link">
+                    <Settings className="h-5 w-5 mr-3" />
+                    <span>Settings</span>
+                </a>
+                <a href="#" onClick={onLogout} className="sidebar-link">
+                    <LogOut className="h-5 w-5 mr-3" />
+                    <span>Logout</span>
+                </a>
+            </div>
+        </aside>
+    );
+};
+
+const MobileNav = ({ role, currentPage, setPage, onLogout }) => {
+    const navItems = {
+        borrower: [ { name: 'Home', icon: Home, page: 'borrower/dashboard' }, { name: 'Apply', icon: FileText, page: 'borrower/apply' }, { name: 'Health', icon: ShieldCheck, page: 'borrower/health' }],
+        lender: [ { name: 'Home', icon: Home, page: 'lender/dashboard' }, { name: 'Invest', icon: TrendingUp, page: 'lender/invest' }, { name: 'Portfolio', icon: Briefcase, page: 'lender/portfolio' }],
+        admin: [ { name: 'Overview', icon: BarChart2, page: 'admin/dashboard' }, { name: 'Users', icon: Users, page: 'admin/users' }, { name: 'Loans', icon: DollarSign, page: 'admin/loans' }],
+    };
+    const currentNav = navItems[role] || [];
+    return (
+        <nav className="mobile-nav">
+            {currentNav.map(item => (
+                <a key={item.name} href="#" onClick={(e) => { e.preventDefault(); setPage(item.page); }} className={`mobile-nav-link ${currentPage === item.page ? 'active' : ''}`}>
+                    <item.icon className="h-6 w-6 mb-1" />
+                    <span>{item.name}</span>
+                </a>
+            ))}
+             <button onClick={onLogout} className="mobile-nav-link">
+                <LogOut className="h-6 w-6 mb-1" />
+                <span>Logout</span>
+            </button>
+        </nav>
+    );
+};
+
+const DashboardCard = ({ icon, title, value, subtext, colorClass = 'text-cyan-500 dark:text-cyan-400' }) => {
+    const Icon = icon;
+    return (
+        <GlassCard>
+            <div className="flex items-center">
+                <div className={`p-3 bg-gray-200/50 dark:bg-gray-800/50 rounded-lg mr-4 ${colorClass}`}>
+                    <Icon size={24} />
+                </div>
+                <div>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm">{title}</p>
+                    <p className="text-2xl font-bold text-gray-800 dark:text-white">{value}</p>
+                    {subtext && <p className="text-xs text-gray-400 dark:text-gray-500">{subtext}</p>}
+                </div>
+            </div>
+        </GlassCard>
+    );
+};
+
+const ChartTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+        return (
+            <div className="chart-tooltip">
+                <p className="label">{`${label}`}</p>
+                {payload.map((pld, index) => (
+                    <p key={index} style={{ color: pld.color }}>
+                        {`${pld.name}: ${pld.value.toLocaleString()}`}
+                    </p>
+                ))}
+            </div>
+        );
+    }
+    return null;
+};
+
+
+// --- PAGE COMPONENTS (src/pages/) ---
+
+const LandingPage = ({ onConnectWallet, isAuthReady }) => {
+    const [isLoading, setIsLoading] = useState(null);
+    const handleConnect = async (walletType) => {
+        setIsLoading(walletType);
+        try {
+            await onConnectWallet(walletType);
+        } catch (error) {
+            console.error("Connection failed:", error);
+            setIsLoading(null);
+        }
+    };
+    return (
+        <div className="page-container">
+            <div className="radial-background"></div>
+            <header className="page-header">
+                <h1>Collatera</h1>
+                <p>Transparent DeFi Lending on ICP</p>
+            </header>
+            <main className="z-10">
+                <GlassCard className="text-center w-full max-w-md animate-fade-in">
+                     <h2 className="page-subheader">Connect your wallet to continue</h2>
+                    <div className="space-y-4">
+                        <NeonButton onClick={() => handleConnect('ii')} disabled={!isAuthReady || !!isLoading} className="w-full">
+                            {isLoading === 'ii' ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <User className="mr-2 h-5 w-5" />}
+                            {!isAuthReady ? 'Initializing...' : isLoading === 'ii' ? 'Connecting...' : 'Connect with Internet Identity'}
+                        </NeonButton>
+                        <NeonButton onClick={() => handleConnect('plug')} disabled={!isAuthReady || !!isLoading} className="w-full">
+                             {isLoading === 'plug' ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Wallet className="mr-2 h-5 w-5" />}
+                             {!isAuthReady ? 'Initializing...' : isLoading === 'plug' ? 'Connecting...' : 'Connect with Plug Wallet'}
+                        </NeonButton>
+                    </div>
+                </GlassCard>
+            </main>
+            <footer className="page-footer">
+                <a href="#" className="footer-link"><Github size={16}/> GitHub</a>
+            </footer>
+        </div>
+    );
+};
+
+const RoleSelectionPage = ({ onSelectRole }) => (
+    <div className="page-container">
+        <div className="radial-background"></div>
+        <header className="page-header">
+            <h1>Select Your Role</h1>
+        </header>
+        <main className="z-10">
+            <GlassCard className="text-center w-full max-w-md animate-fade-in">
+                <h2 className="page-subheader">How would you like to proceed?</h2>
+                <div className="space-y-4">
+                    <NeonButton onClick={() => onSelectRole('Borrower')} className="w-full">
+                        <TrendingUp className="mr-2 h-5 w-5" /> Continue as Borrower
+                    </NeonButton>
+                    <NeonButton onClick={() => onSelectRole('Lender')} className="w-full">
+                        <DollarSign className="mr-2 h-5 w-5" /> Continue as Lender
+                    </NeonButton>
+                    <NeonButton onClick={() => onSelectRole('Admin')} className="w-full">
+                        <User className="mr-2 h-5 w-5" /> Continue as Admin
+                    </NeonButton>
+                </div>
+            </GlassCard>
+        </main>
+    </div>
+);
+
+const BorrowerDashboard = ({ setPage, theme, dashboardData }) => (
+    <div className="dashboard-container">
+        <h2 className="dashboard-header">Borrower Dashboard</h2>
+        <GlassCard>
+            <h3 className="card-header">Your Loans</h3>
+            <pre className="text-xs overflow-auto">{JSON.stringify(dashboardData.loans || [], (k, v) => typeof v === 'bigint' ? v.toString() : v, 2)}</pre>
+        </GlassCard>
+    </div>
+);
+
+const LenderDashboard = ({ setPage, dashboardData }) => (
+    <div className="dashboard-container">
+        <h2 className="dashboard-header">Lender Dashboard</h2>
+        <GlassCard>
+            <h3 className="card-header">Available Loans to Fund</h3>
+             <pre className="text-xs overflow-auto">{JSON.stringify(dashboardData.pendingLoans || [], (k, v) => typeof v === 'bigint' ? v.toString() : v, 2)}</pre>
+        </GlassCard>
+    </div>
+);
+
+const AdminDashboard = ({ setPage, theme, dashboardData }) => (
+     <div className="dashboard-container">
+        <h2 className="dashboard-header">Admin Dashboard</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <DashboardCard icon={DollarSign} title="Total Borrowed" value={`$${Number(dashboardData.totalBorrowed || 0).toLocaleString()}`} />
+            <DashboardCard icon={Briefcase} title="Active Loans" value={Number(dashboardData.activeLoans || 0)} />
+        </div>
+    </div>
+);
+
+const LoanApplicationPage = () => <div>Loan Application Page</div>;
+const ProfilePage = () => <div>Profile Page</div>;
+const LoanHealthPage = () => <div>Loan Health Page</div>;
+
+
+
+
+
+
 
 // --- MOCK DATA (Initial State & Backend Simulation) --- //
 const initialMockLoanData = {
@@ -783,146 +1043,459 @@ const api = {
 // --- MAIN APP COMPONENT --- //
 
 export default function App() {
-  const [isWalletConnected, setIsWalletConnected] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState(null);
-  const [userData, setUserData] = useState(null);
+  const [auth, setAuth] = useState({
+      actor: null,
+      authClient: null,
+      isAuthenticated: false,
+      principal: null,
+      role: null,
+  });
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentPage, setCurrentPage] = useState('landing');
   const [theme, setTheme] = useState('dark');
-  
-  // State for dynamic data
-  const [loanData, setLoanData] = useState(null);
-  const [collateralHistory, setCollateralHistory] = useState(null);
-  const [lenderInfo, setLenderInfo] = useState(null);
-  const [adminInfo, setAdminInfo] = useState(null);
+  const [dashboardData, setDashboardData] = useState({});
 
-  // Set the theme on the body for global styles and in localStorage to persist
   useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === 'light') {
-        root.classList.remove('dark');
-    } else {
-        root.classList.add('dark');
-    }
+    document.documentElement.className = theme;
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Check for saved theme on initial load
+  const toggleTheme = () => setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+
   useEffect(() => {
-      const savedTheme = localStorage.getItem('theme');
-      if (savedTheme) {
-          setTheme(savedTheme);
-      }
+    const initAuth = async () => {
+        const authClient = await AuthClient.create();
+        const isAuthenticated = await authClient.isAuthenticated();
+        const identity = authClient.getIdentity();
+        const principal = identity.getPrincipal();
+
+        const actor = createActor(canisterId, {
+            agentOptions: { identity },
+        });
+
+        setAuth({
+            actor,
+            authClient,
+            isAuthenticated,
+            principal,
+            role: null, // Role is determined after login
+        });
+        setIsAuthReady(true);
+    };
+    initAuth();
   }, []);
 
-  const toggleTheme = () => {
-      setTheme(prevTheme => (prevTheme === 'dark' ? 'light' : 'dark'));
-  };
-
   const handleConnectWallet = async (walletType) => {
-      try {
-          let connectedUserData;
-          if (walletType === 'ii') {
-              connectedUserData = await api.connectWithInternetIdentity();
-          } else {
-              connectedUserData = await api.connectWithPlugWallet();
-          }
-          
-          if (connectedUserData) {
-              setUserData(connectedUserData);
-              setIsWalletConnected(true);
-          }
-      } catch (error) {
-          console.error("Connection failed:", error);
-          // Here you would show an error message to the user
-      }
+    if (!isAuthReady || !auth.authClient) return;
+
+    const identityProvider = process.env.DFX_NETWORK === 'ic'
+      ? 'https://identity.ic0.app'
+      : `http://localhost:4943?canisterId=${canisterId}`;
+
+    await auth.authClient.login({
+      identityProvider,
+      onSuccess: () => {
+        const identity = auth.authClient.getIdentity();
+        const principal = identity.getPrincipal();
+        const actor = createActor(canisterId, {
+            agentOptions: { identity },
+        });
+        
+        setAuth(prev => ({
+            ...prev,
+            actor,
+            isAuthenticated: true,
+            principal,
+        }));
+
+        setCurrentPage('role-selection');
+      },
+    });
   };
 
-  const handleLogin = async (role) => {
-    setUserRole(role);
-    
-    // Fetch data based on role
-    const data = await api.fetchUserData(role, userData.principalId);
-    if (role === 'borrower') {
-        setLoanData(data.loanData);
-        setCollateralHistory(data.collateralHistory);
-    } else if (role === 'lender') {
-        setLenderInfo(data.lenderData);
-    } else if (role === 'admin') {
-        setAdminInfo(data.adminData);
+  const handleSelectRole = async (role) => {
+    if (!auth.actor) {
+        console.error("Actor not ready");
+        return;
     }
+    const roleVariant = { [role]: null };
+    const result = await auth.actor.register_user(roleVariant);
     
-    setIsLoggedIn(true);
-    setCurrentPage(`${role}/dashboard`);
+    if ('Ok' in result) {
+        setAuth(prev => ({ ...prev, role }));
+        const data = await api.fetchDashboardData(role, auth.principal.toString());
+        setDashboardData(data);
+        setCurrentPage(`${role.toLowerCase()}/dashboard`);
+    } else {
+        console.error("Failed to register user:", result.Err);
+        if (result.Err === "User already exists.") {
+            setAuth(prev => ({ ...prev, role }));
+            const data = await api.fetchDashboardData(role, auth.principal.toString());
+            setDashboardData(data);
+            setCurrentPage(`${role.toLowerCase()}/dashboard`);
+        }
+    }
   };
 
-  const handleLogout = () => {
-    setIsWalletConnected(false);
-    setIsLoggedIn(false);
-    setUserRole(null);
-    setUserData(null);
-    setLoanData(null);
-    setCollateralHistory(null);
-    setLenderInfo(null);
-    setAdminInfo(null);
+  const handleLogout = async () => {
+    if (auth.authClient) {
+        await auth.authClient.logout();
+    }
+    // Re-initialize the actor with an anonymous identity
+    const authClient = await AuthClient.create();
+    const identity = authClient.getIdentity();
+    const actor = createActor(canisterId, { agentOptions: { identity }});
+    
+    setAuth({
+        actor,
+        authClient,
+        isAuthenticated: false,
+        principal: null,
+        role: null,
+    });
     setCurrentPage('landing');
   };
   
-  // Render logic based on authentication state
-  if (!isWalletConnected) {
-      return <LandingPage onConnectWallet={handleConnectWallet} />;
-  }
+  const renderContent = () => {
+      if (!auth.isAuthenticated) {
+          return <LandingPage onConnectWallet={handleConnectWallet} isAuthReady={isAuthReady} />;
+      }
+      if (!auth.role) {
+          return <RoleSelectionPage onSelectRole={handleSelectRole} />;
+      }
+      
+      const PageComponent = {
+          'borrower/dashboard': BorrowerDashboard,
+          'lender/dashboard': LenderDashboard,
+          'admin/dashboard': AdminDashboard,
+          'borrower/apply': LoanApplicationPage,
+          'profile': ProfilePage,
+          'borrower/health': LoanHealthPage,
+      }[currentPage] || (() => <div>Page not found</div>);
 
-  if (!isLoggedIn) {
-      return <RoleSelectionPage onLogin={handleLogin} />;
-  }
-
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'borrower/dashboard': 
-        return <BorrowerDashboard setPage={setCurrentPage} theme={theme} loanData={loanData} collateralHistory={collateralHistory} />;
-      case 'lender/dashboard': 
-        return <LenderDashboard setPage={setCurrentPage} lenderData={lenderInfo} />;
-      case 'admin/dashboard': 
-        return <AdminDashboard setPage={setCurrentPage} theme={theme} adminData={adminInfo} />;
-      case 'borrower/apply': 
-        return <LoanApplicationPage setPage={setCurrentPage} />;
-      case 'borrower/health': 
-        return <LoanHealthPage theme={theme} loanData={loanData} />;
-      case 'profile':
-      case 'lender/portfolio':
-      case 'lender/invest':
-      case 'admin/users':
-      case 'admin/loans':
-      case 'admin/wallets':
-        return <ProfilePage />;
-      default:
-        handleLogout(); 
-        return null;
-    }
+      return (
+          <div className="app-container">
+              <Sidebar role={auth.role.toLowerCase()} currentPage={currentPage} setPage={setCurrentPage} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme}/>
+              <main className="main-content">
+                  <PageComponent setPage={setCurrentPage} theme={theme} dashboardData={dashboardData} />
+              </main>
+              <MobileNav role={auth.role.toLowerCase()} currentPage={currentPage} setPage={setCurrentPage} onLogout={handleLogout} />
+          </div>
+      );
   };
 
   return (
-    <div className="font-inter flex min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-300">
-      <div className="flex flex-1">
-        <Sidebar 
-          role={userRole} 
-          currentPage={currentPage} 
-          setPage={setCurrentPage} 
-          onLogout={handleLogout} 
-          theme={theme} 
-          toggleTheme={toggleTheme}
-        />
-        <main className="flex-1 bg-gray-50 dark:bg-gray-800/50 overflow-y-auto pb-20 md:pb-0">
-          {renderPage()}
-        </main>
-        <MobileNav 
-          role={userRole} 
-          currentPage={currentPage} 
-          setPage={setCurrentPage} 
-          onLogout={handleLogout} 
-        />
-      </div>
+    <div className="font-inter">
+        <style>{`
+            /* --- IMPORTS & FONT-FACE --- */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+            /* --- THEME VARIABLES & BASE STYLES --- */
+            :root {
+              --font-family: 'Inter', sans-serif;
+              --bg-light: #f4f7f9;
+              --bg-dark: #0d1117;
+              --text-light: #1f2937;
+              --text-dark: #e6edf3;
+              --purple-light: #8b5cf6;
+              --purple-dark: #a78bfa;
+              --cyan-light: #06b6d4;
+              --cyan-dark: #22d3ee;
+            }
+
+            html {
+              scroll-behavior: smooth;
+            }
+
+            html.light {
+              --bg-primary: var(--bg-light);
+              --bg-secondary: #ffffff;
+              --text-primary: var(--text-light);
+              --text-secondary: #4b5563;
+              --border-color: rgba(0, 0, 0, 0.08);
+              --header-color: var(--purple-light);
+            }
+
+            html.dark {
+              --bg-primary: var(--bg-dark);
+              --bg-secondary: #161b22;
+              --text-primary: var(--text-dark);
+              --text-secondary: #8b949e;
+              --border-color: rgba(139, 148, 158, 0.2);
+              --header-color: var(--purple-dark);
+            }
+
+            body {
+              font-family: var(--font-family);
+              background-color: var(--bg-primary);
+              color: var(--text-primary);
+              transition: background-color 0.3s, color 0.3s;
+              -webkit-font-smoothing: antialiased;
+              -moz-osx-font-smoothing: grayscale;
+            }
+
+            /* --- ANIMATIONS --- */
+            @keyframes fade-in {
+              from { opacity: 0; transform: translateY(10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+
+            .animate-fade-in {
+              animation: fade-in 0.7s ease-out forwards;
+            }
+
+            /* --- LAYOUT --- */
+            .app-container {
+              display: flex;
+              min-height: 100vh;
+            }
+
+            .main-content {
+              flex-grow: 1;
+              overflow-y: auto;
+              padding-bottom: 6rem;
+              background-color: var(--bg-primary);
+            }
+
+            @media (min-width: 768px) {
+              .main-content {
+                padding-bottom: 0;
+              }
+            }
+
+
+            /* --- COMPONENT STYLES --- */
+
+            .neon-button {
+              padding: 0.8rem 1.5rem;
+              font-weight: 600;
+              color: white;
+              border-radius: 0.5rem;
+              box-shadow: 0 0 12px rgba(34, 211, 238, 0.4), inset 0 0 6px rgba(34, 211, 238, 0.3);
+              border: 1px solid var(--cyan-dark);
+              background-color: rgba(6, 182, 212, 0.25);
+              backdrop-filter: blur(4px);
+              transition: all 0.3s ease-in-out;
+              transform: scale(1);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 100%;
+              cursor: pointer;
+            }
+            .neon-button:hover {
+              background-color: rgba(6, 182, 212, 0.4);
+              box-shadow: 0 0 24px rgba(34, 211, 238, 0.6);
+              transform: scale(1.03);
+            }
+            .neon-button:disabled {
+              opacity: 0.6;
+              cursor: not-allowed;
+              transform: scale(1);
+              box-shadow: none;
+            }
+
+            .glass-card {
+              backdrop-filter: blur(16px) saturate(180%);
+              border-radius: 1rem;
+              padding: 1.5rem;
+              border: 1px solid var(--border-color);
+              transition: background-color 0.3s, box-shadow 0.3s;
+            }
+            html.light .glass-card {
+              background-color: rgba(255, 255, 255, 0.7);
+              box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+            }
+            html.dark .glass-card {
+              background-color: rgba(22, 27, 34, 0.7);
+              box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+            }
+
+            .sidebar {
+              width: 16rem;
+              flex-shrink: 0;
+              background-color: var(--bg-secondary);
+              border-right: 1px solid var(--border-color);
+              padding: 1.5rem 1rem;
+              display: none;
+              flex-direction: column;
+              transition: background-color 0.3s, border-color 0.3s;
+            }
+            @media (min-width: 768px) {
+              .sidebar {
+                display: flex;
+              }
+            }
+            .sidebar-header {
+              font-size: 1.75rem;
+              font-weight: 700;
+              margin-bottom: 2.5rem;
+              padding: 0 0.5rem;
+              color: var(--header-color);
+            }
+            .sidebar-link {
+              display: flex;
+              align-items: center;
+              padding: 0.75rem 1rem;
+              margin: 0.25rem 0;
+              border-radius: 0.5rem;
+              transition: all 0.2s;
+              color: var(--text-secondary);
+              width: 100%;
+              font-weight: 500;
+            }
+            .sidebar-link:hover {
+              color: var(--text-primary);
+              background-color: rgba(139, 92, 246, 0.08);
+            }
+            html.dark .sidebar-link:hover {
+              background-color: rgba(167, 139, 250, 0.1);
+            }
+            .sidebar-link.active {
+              background-color: rgba(139, 92, 246, 0.15);
+              color: var(--header-color);
+              font-weight: 600;
+            }
+            html.dark .sidebar-link.active {
+              background-color: rgba(167, 139, 250, 0.2);
+              color: var(--purple-dark);
+            }
+
+            .mobile-nav {
+              position: fixed;
+              bottom: 0;
+              left: 0;
+              right: 0;
+              border-top: 1px solid var(--border-color);
+              display: flex;
+              justify-content: space-around;
+              padding: 0.5rem;
+              backdrop-filter: blur(16px) saturate(180%);
+              background-color: rgba(255, 255, 255, 0.8);
+            }
+            html.dark .mobile-nav {
+              background-color: rgba(22, 27, 34, 0.8);
+            }
+            @media (min-width: 768px) {
+              .mobile-nav {
+                display: none;
+              }
+            }
+            .mobile-nav-link {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              font-size: 0.75rem;
+              color: var(--text-secondary);
+              transition: color 0.2s;
+              padding: 0.25rem 0.5rem;
+              border-radius: 0.5rem;
+            }
+            .mobile-nav-link:hover {
+              color: var(--text-primary);
+            }
+            .mobile-nav-link.active {
+              color: var(--header-color);
+            }
+
+            .page-container {
+              width: 100%;
+              min-height: 100vh;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              padding: 1rem;
+            }
+            .radial-background {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              z-index: -1;
+            }
+            html.light .radial-background {
+              background-image: radial-gradient(circle at center, rgba(167, 139, 250, 0.05) 0%, transparent 40%);
+            }
+            html.dark .radial-background {
+              background-image: radial-gradient(circle at center, rgba(167, 139, 250, 0.1) 0%, transparent 40%);
+            }
+            .page-header {
+              text-align: center;
+              z-index: 10;
+              margin-bottom: 3rem;
+            }
+            .page-header h1 {
+              font-size: 3.5rem;
+              font-weight: 800;
+              color: var(--header-color);
+              letter-spacing: -0.025em;
+            }
+            .page-header p {
+              font-size: 1.125rem;
+              color: var(--text-secondary);
+              margin-top: 1rem;
+              max-width: 400px;
+            }
+            .page-subheader {
+              font-size: 1.25rem;
+              font-weight: 400;
+              color: var(--text-secondary);
+              margin-bottom: 2rem;
+            }
+            .page-footer {
+              position: absolute;
+              bottom: 1.5rem;
+              text-align: center;
+              z-index: 10;
+            }
+            .footer-link {
+              color: var(--text-secondary);
+              transition: color 0.3s;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 0.5rem;
+            }
+            .footer-link:hover {
+              color: var(--cyan-dark);
+            }
+
+            .dashboard-container {
+              padding: 1.5rem;
+            }
+            @media (min-width: 640px) {
+              .dashboard-container {
+                padding: 2.5rem;
+              }
+            }
+            .dashboard-header {
+              font-size: 2.25rem;
+              font-weight: 700;
+              color: var(--text-primary);
+              margin-bottom: 2.5rem;
+            }
+            .card-header {
+              font-size: 1.125rem;
+              font-weight: 600;
+              color: var(--text-primary);
+              margin-bottom: 1rem;
+            }
+
+            .font-inter { font-family: 'Inter', sans-serif; }
+            .w-full { width: 100%; }
+            .max-w-md { max-width: 28rem; }
+            .text-center { text-align: center; }
+            .z-10 { z-index: 10; }
+            .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
+            .mr-2 { margin-right: 0.5rem; }
+            .h-5 { height: 1.25rem; }
+            .w-5 { width: 1.25rem; }
+            .animate-spin { animation: spin 1s linear infinite; }
+            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+        {renderContent()}
     </div>
   );
 }
